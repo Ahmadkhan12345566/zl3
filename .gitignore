@@ -9,7 +9,7 @@
 /plugins/*
 
 /webroot/bootstrap/*
-/webroot/bootstrap_u_i/*
+
 /webroot/debug_kit/*
 /webroot/files/*
 /webroot/less/*
