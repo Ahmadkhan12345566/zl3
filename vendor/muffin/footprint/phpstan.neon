@@ -1,0 +1,12 @@
+parameters:
+	level: 7
+	checkGenericClassInNonGenericObjectType: false
+	checkMissingIterableValueType: false
+	treatPhpDocTypesAsCertain: false
+	paths:
+		- src/
+	ignoreErrors:
+		-
+			message: "#^Call to an undefined method object\\:\\:getEventManager\\(\\)\\.$#"
+			count: 1
+			path: src/Plugin.php

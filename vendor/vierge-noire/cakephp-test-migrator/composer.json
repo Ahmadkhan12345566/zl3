@@ -1,0 +1,44 @@
+{
+  "name": "vierge-noire/cakephp-test-migrator",
+  "description": "Migration helper for the CakePHP Test Suite Light",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Juan Pablo Ramirez",
+      "email": "pabloelcolombiano@gmail.com"
+    }
+  ],
+  "minimum-stability": "dev",
+  "require": {
+    "cakephp/cakephp": "^4.0"
+  },
+  "require-dev": {
+    "cakephp/cakephp-codesniffer": "^4.0",
+    "cakephp/migrations": "^3.1",
+    "josegonzalez/dotenv": "dev-master",
+    "phpunit/phpunit": "^8.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "CakephpTestMigrator\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "CakephpTestMigrator\\Test\\": "tests",
+      "MigratorTestApp\\": "tests\\TestApp\\src"
+    }
+  },
+  "scripts": {
+    "cs-check": "phpcs --colors --parallel=16 -p src/ tests/",
+    "cs-fix": "phpcbf --colors --parallel=16 -p src/ tests/",
+    "mysql": "bash run_tests.sh Mysql",
+    "pgsql": "bash run_tests.sh Postgres",
+    "sqlite": "bash run_tests.sh Sqlite",
+    "phpstan": "./vendor/bin/phpstan analyse --memory-limit=-1",
+    "stan-setup": "cp composer.json composer.backup && composer require --dev phpstan/phpstan:0.12.88 && mv composer.backup composer.json"
+  },
+  "config": {
+    "sort-packages": true
+  }
+}
