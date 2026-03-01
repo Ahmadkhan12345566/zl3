@@ -1,0 +1,160 @@
+
+msgid "Field"
+msgstr ""
+
+msgid "Fields"
+msgstr ""
+
+msgid "field"
+msgstr ""
+
+msgid "fields"
+msgstr ""
+
+msgid "Court"
+msgstr ""
+
+msgid "Courts"
+msgstr ""
+
+msgid "court"
+msgstr ""
+
+msgid "courts"
+msgstr ""
+
+msgid "Pitch"
+msgstr ""
+
+msgid "Pitchs"
+msgstr ""
+
+msgid "pitch"
+msgstr ""
+
+msgid "pitches"
+msgstr ""
+
+msgid "Diamond"
+msgstr ""
+
+msgid "Diamonds"
+msgstr ""
+
+msgid "diamond"
+msgstr ""
+
+msgid "diamonds"
+msgstr ""
+
+msgid "Rink"
+msgstr ""
+
+msgid "Rinks"
+msgstr ""
+
+msgid "rink"
+msgstr ""
+
+msgid "rinks"
+msgstr ""
+
+msgid "Gym"
+msgstr ""
+
+msgid "Gyms"
+msgstr ""
+
+msgid "gym"
+msgstr ""
+
+msgid "gyms"
+msgstr ""
+
+#: /config/features.php:176
+msgid "automatic approval"
+msgstr ""
+
+#: /config/features.php:177
+msgid "approval using home submission"
+msgstr ""
+
+#: /config/features.php:178
+msgid "approval using away submission"
+msgstr ""
+
+#: /config/features.php:179
+msgid "automatically forfeited due to lack of score submission"
+msgstr ""
+
+#: /config/features.php:183
+msgid "Attending"
+msgstr ""
+
+#: /config/features.php:184
+msgid "Absent"
+msgstr ""
+
+#: /config/features.php:186
+msgid "Invited"
+msgstr ""
+
+#: /config/features.php:187
+msgid "Available"
+msgstr ""
+
+#: /config/features.php:188
+msgid "No Show"
+msgstr ""
+
+#: /config/features.php:201;210
+msgid "attending"
+msgstr ""
+
+#: /config/features.php:202;211
+msgid "absent for"
+msgstr ""
+
+#: /config/features.php:203;212
+msgid "unknown/undecided for"
+msgstr ""
+
+#: /config/features.php:204
+msgid "invited to sub for"
+msgstr ""
+
+#: /config/features.php:205
+msgid "available to sub for"
+msgstr ""
+
+#: /config/features.php:206;215
+msgid "a no-show for"
+msgstr ""
+
+#: /config/features.php:213
+msgid "invited to attend"
+msgstr ""
+
+#: /config/features.php:214
+msgid "available to attend"
+msgstr ""
+
+#: /config/features.php:219
+msgid "Predecessor"
+msgstr ""
+
+#: /config/features.php:220
+msgid "Successor"
+msgstr ""
+
+#: /config/features.php:221
+msgid "Alternate"
+msgstr ""
+
+#: /config/features.php:225
+msgid "Private"
+msgstr ""
+
+#: /config/features.php:228
+msgid "Public"
+msgstr ""
