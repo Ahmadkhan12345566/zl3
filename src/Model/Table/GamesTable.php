@@ -841,6 +841,9 @@ class GamesTable extends AppTable {
 				$entity->game_slot = $this->GameSlots->patchEntity($entity->game_slot, ['assigned' => true]);
 			}
 
+			// Persist the assigned flag so other divisions (e.g. in the same facility) only see unassigned slots.
+			$this->GameSlots->save($entity->game_slot);
+
 			// TODOLATER: We should only do this when a change is made that might affect the field rankings:
 			// home team, away team, game slot, field id
 			if ($entity->game_slot->has('field')) {
@@ -1180,7 +1183,7 @@ class GamesTable extends AppTable {
 					if (!empty($team->facilities)) {
 						$pref = collection($team->facilities)->firstMatch(['id' => $game->game_slot->field->facility_id]);
 						if ($pref) {
-							$rank = $pref->_joinData->rank;
+							$rank = $pref->_joinData->ranking;
 						} else if ($team_type == 'home_team' && !empty($team->facilities)) {
 							$some_home_preference = true;
 						}
@@ -1651,14 +1654,6 @@ class GamesTable extends AppTable {
 		}
 
 		return $options;
-	}
-
-	public static function twitterScore($team, $team_score, $opponent, $opponent_score) {
-		if ($team_score >= $opponent_score) {
-			return $team->twitterName() . ' ' . $team_score . ', ' . $opponent->twitterName() . ' ' . $opponent_score;
-		} else {
-			return $opponent->twitterName() . ' ' . $opponent_score . ', ' . $team->twitterName() . ' ' . $team_score;
-		}
 	}
 
 	public function affiliate($id) {

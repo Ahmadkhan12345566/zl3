@@ -68,7 +68,7 @@ class TeamsController extends AppController {
 	public function beforeFilter(\Cake\Event\EventInterface $event) {
 		parent::beforeFilter($event);
 		if (isset($this->FormProtection)) {
-			$this->FormProtection->setConfig('unlockedActions', ['edit', 'add_from_team']);
+			$this->FormProtection->setConfig('unlockedActions', ['edit', 'add_from_team', 'add_players_from_csv']);
 		}
 	}
 
@@ -80,6 +80,9 @@ class TeamsController extends AppController {
 	public function index() {
 		$affiliate = $this->getRequest()->getQuery('affiliate');
 		$affiliates = $this->Authentication->applicableAffiliateIDs();
+		if (empty($affiliates)) {
+			$affiliates = [0];
+		}
 
 		$query = $this->Teams->find()
 			->matching('Divisions.Leagues.Affiliates', function (Query $q) use ($affiliates) {
@@ -94,22 +97,7 @@ class TeamsController extends AppController {
 			return $this->redirect(['action' => 'index']);
 		}
 
-		$letters = $this->Teams->find()
-			->enableHydration(false)
-			// TODO: Use a query object here
-			->select(['letter' => 'DISTINCT SUBSTR(Teams.name, 1, 1)'])
-			->matching('Divisions.Leagues.Affiliates', function (Query $q) use ($affiliates) {
-				return $q->where(['Affiliates.id IN' => $affiliates]);
-			})
-			->where([
-				'Divisions.is_open' => true,
-				'Affiliates.id IN' => $affiliates,
-			])
-			->order(['letter'])
-			->all()
-			->extract('letter')
-			->toArray();
-
+		$letters = [];
 		$leagues = $this->Teams->Divisions->Leagues->find()
 			->where([
 				'Leagues.is_open' => true,
@@ -974,7 +962,7 @@ class TeamsController extends AppController {
 					$data['facilities'][$key] = [
 						'id' => $facility_id,
 						'_joinData' => [
-							'rank' => $key + 1,
+							'ranking' => $key + 1,
 						],
 					];
 				}
@@ -1069,7 +1057,7 @@ class TeamsController extends AppController {
 					$data['facilities'][$key] = [
 						'id' => $facility_id,
 						'_joinData' => [
-							'rank' => $key + 1,
+							'ranking' => $key + 1,
 						],
 					];
 				}
@@ -1350,12 +1338,6 @@ class TeamsController extends AppController {
 			->contain(['Leagues'])
 			->where($conditions)
 			->toArray();
-
-		// Make sure there's somewhere to move it to
-		if (empty($divisions)) {
-			$this->Flash->info(__('No similar division found to move this team to!'));
-			return $this->redirect(['action' => 'view', '?' => ['team' => $id]]);
-		}
 
 		$this->set(compact('team', 'divisions', 'loose'));
 	}
@@ -1743,6 +1725,318 @@ class TeamsController extends AppController {
 				->toArray();
 			$this->set(compact('events'));
 		}
+	}
+
+	/**
+	 * Upload a CSV to register new athletes and add them to the current team.
+	 * CSV must have headers: first_name, last_name, email (optional: gender, birthdate, mobile_phone).
+	 * Existing users (by email) are added to the team; new users are created then added.
+	 *
+	 * @return \Cake\Http\Response|null
+	 */
+	public function add_players_from_csv() {
+		$this->getRequest()->allowMethod(['post']);
+
+		$id = $this->getRequest()->getQuery('team');
+		try {
+			/** @var Team $team */
+			$team = $this->Teams->get($id, [
+				'contain' => ['People', 'Divisions' => ['Leagues']],
+			]);
+		} catch (RecordNotFoundException|InvalidPrimaryKeyException $ex) {
+			$this->Flash->info(__('Invalid team.'));
+			return $this->redirect(['action' => 'index']);
+		}
+
+		$this->Authorization->authorize(new ContextResource($team, ['division' => $team->division]), 'add_player');
+		if (empty($team->division_id)) {
+			$this->Configuration->loadAffiliate($team->affiliate_id);
+		} else {
+			$this->Configuration->loadAffiliate($team->division->league->affiliate_id);
+		}
+
+		$existing_roster_ids = collection($team->people)->extract('id')->toArray();
+
+		$upload = $this->getRequest()->getData('csv_file');
+		if (empty($upload) || !empty($upload['error']) || empty($upload['tmp_name'])) {
+			$this->Flash->warning(__('Please upload a CSV file.'));
+			return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+		}
+
+		$allowed_types = ['text/csv', 'text/plain', 'application/csv', 'application/vnd.ms-excel'];
+		$finfo = finfo_open(FILEINFO_MIME_TYPE);
+		$mime = finfo_file($finfo, $upload['tmp_name']);
+		finfo_close($finfo);
+		if (!in_array($mime, $allowed_types) && !preg_match('/\.csv$/i', $upload['name'] ?? '')) {
+			$this->Flash->warning(__('Only CSV files are supported.'));
+			return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+		}
+
+		$affiliate_id = empty($team->division_id) ? $team->affiliate_id : $team->division->league->affiliate_id;
+		$users_table = TableRegistry::getTableLocator()->get(Configure::read('Security.authPlugin') . Configure::read('Security.authModel'));
+		$people_table = $users_table->People;
+		$email_field = $users_table->emailField;
+
+		try {
+			$fp = fopen($upload['tmp_name'], 'r');
+		if ($fp === false) {
+			$this->Flash->warning(__('Could not read the uploaded file.'));
+			return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+		}
+
+		$header = fgetcsv($fp);
+		if ($header === false) {
+			fclose($fp);
+			$this->Flash->warning(__('The CSV file appears to be empty.'));
+			return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+		}
+		$header = array_map('trim', $header);
+		$header_lower = array_change_key_case(array_flip($header), CASE_LOWER);
+		$required = ['first_name', 'last_name', 'email'];
+		foreach ($required as $col) {
+			if (!isset($header_lower[$col])) {
+				fclose($fp);
+				$this->Flash->warning(__('CSV must have headers: first_name, last_name, email.'));
+				return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+			}
+		}
+
+		$added = [];
+		$added_persons = [];
+		$skipped = [];
+		$failed = [];
+
+		while (($row = fgetcsv($fp)) !== false) {
+			if (count($row) < count($header)) {
+				$row = array_pad($row, count($header), '');
+			}
+			$row = array_slice($row, 0, count($header));
+			$data = array_combine($header, $row);
+			if ($data === false) {
+				continue;
+			}
+			$first_name = trim($data[$header[$header_lower['first_name']]] ?? '');
+			$last_name = trim($data[$header[$header_lower['last_name']]] ?? '');
+			$email = trim($data[$header[$header_lower['email']]] ?? '');
+			if ($first_name === '' || $last_name === '' || $email === '') {
+				$failed[] = implode(' ', array_filter([$first_name, $last_name, $email])) ?: __('(blank row)');
+				continue;
+			}
+
+			$existing_user = $users_table->find()
+				->where([$users_table->aliasField($email_field) => $email])
+				->contain(['People'])
+				->first();
+
+			if ($existing_user && $existing_user->person) {
+				$person = $existing_user->person;
+				if (in_array($person->id, $existing_roster_ids)) {
+					$skipped[] = $person->full_name . ' (' . __('already on roster') . ')';
+					continue;
+				}
+				$person = $people_table->get($person->id, ['contain' => [Configure::read('Security.authModel')]]);
+			} else {
+				$person = $this->_createPersonFromCsvRow($users_table, $people_table, $header, $header_lower, $data, $affiliate_id, $email_field);
+				if ($person === null) {
+					$failed[] = $first_name . ' ' . $last_name . ' (' . $email . ')';
+					continue;
+				}
+				$existing_roster_ids[] = $person->id;
+			}
+
+			$person->unset('_joinData');
+			$status = $this->_setRosterRole($person, $team, ROSTER_APPROVED, 'player', 'unspecified');
+			if ($status !== false) {
+				$added[] = $person->full_name;
+				$added_persons[] = $person;
+				$existing_roster_ids[] = $person->id;
+			} else {
+				$failed[] = $person->full_name;
+			}
+		}
+		fclose($fp);
+
+		$msg = [];
+		if (!empty($added)) {
+			$event = new CakeEvent('Model.Team.rosterUpdate', $this, [$team->id, $added_persons]);
+			$this->getEventManager()->dispatch($event);
+			$msg[] = __n('{0} has been added to the roster.', '{0} have been added to the roster.',
+				count($added), Text::toList($added));
+		}
+		if (!empty($skipped)) {
+			$msg[] = __n('Skipped (already on roster): {0}', 'Skipped (already on roster): {0}', count($skipped), Text::toList($skipped));
+		}
+		if (!empty($failed)) {
+			$msg[] = __n('Failed to add: {0}', 'Failed to add: {0}', count($failed), Text::toList($failed));
+		}
+		if (empty($msg)) {
+			$this->Flash->info(__('No valid rows found in the CSV.'));
+		} else {
+			$this->Flash->success(implode(' ', $msg));
+		}
+
+		} catch (\Throwable $e) {
+			if (isset($fp) && is_resource($fp)) {
+				fclose($fp);
+			}
+			$this->log($e->getMessage() . "\n" . $e->getTraceAsString(), 'error');
+			$this->Flash->warning(__('An error occurred while processing the CSV. Please check the file format and that your CSV includes all required profile fields (or contact an administrator).'));
+		}
+
+		return $this->redirect(['action' => 'add_player', '?' => ['team' => $team->id]]);
+	}
+
+	/**
+	 * Create a single person (and user) from a CSV row. Returns Person entity or null on failure.
+	 *
+	 * @param \Cake\ORM\Table $users_table
+	 * @param \Cake\ORM\Table $people_table
+	 * @param array $header
+	 * @param array $header_lower
+	 * @param array $data
+	 * @param int $affiliate_id
+	 * @param string $email_field
+	 * @return \App\Model\Entity\Person|null
+	 */
+	protected function _createPersonFromCsvRow($users_table, $people_table, $header, $header_lower, $data, $affiliate_id, $email_field) {
+		$get = function ($key) use ($header, $header_lower, $data) {
+			$idx = $header_lower[$key] ?? null;
+			return $idx !== null ? trim($data[$header[$idx]] ?? '') : '';
+		};
+		$email = $get('email');
+		$first_name = $get('first_name');
+		$last_name = $get('last_name');
+		if ($email === '' || $first_name === '' || $last_name === '') {
+			return null;
+		}
+
+		$save = [
+			'first_name' => $first_name,
+			'last_name' => $last_name,
+			$email_field => $email,
+			'user_name' => $email,
+			'user_groups' => ['_ids' => [GROUP_PLAYER]],
+			'affiliates' => ['_ids' => [AFFILIATE_DUMMY]],
+			'status' => 'active',
+			'complete' => true,
+		];
+		if (Configure::read('feature.affiliates')) {
+			$save['affiliates'] = ['_ids' => [$affiliate_id]];
+		}
+		$pwd = $this->_generatePasswordForCsv();
+		$save['new_password'] = $pwd;
+		$save['confirm_password'] = $pwd;
+		$save[$users_table->pwdField] = $pwd;
+
+		// Merge defaults for all profile-required fields so validation passes (same as create_account form).
+		$save = array_merge($this->_getCsvImportDefaults(), $save);
+
+		// Override with any optional CSV columns (header names case-insensitive).
+		$optional = [
+			'gender', 'roster_designation', 'birthdate', 'height', 'shirt_size',
+			'home_phone', 'work_phone', 'mobile_phone', 'work_ext',
+			'addr_street', 'addr_city', 'addr_prov', 'addr_country', 'addr_postalcode',
+		];
+		foreach ($optional as $col) {
+			if (isset($header_lower[$col])) {
+				$val = $get($col);
+				if ($val !== '') {
+					$save[$col] = $val;
+				}
+			}
+		}
+
+		$user = $users_table->newEmptyEntity();
+		$user = $users_table->patchEntity($user, $save, [
+			'associated' => ['People', 'People.UserGroups', 'People.Affiliates', 'People.Skills'],
+			'validate' => 'create',
+		]);
+		if (!$users_table->save($user, ['manage_affiliates' => true, 'manage_groups' => true])) {
+			return null;
+		}
+		$person = $user->person;
+		if ($person && !$person->complete) {
+			$person->complete = true;
+			$people_table->save($person);
+		}
+		return $person;
+	}
+
+	/**
+	 * Default values for CSV-created people so they pass the same validation as create_account.
+	 * Uses first valid option from site config for dropdowns; placeholders for required text/address/phone.
+	 *
+	 * @return array
+	 */
+	protected function _getCsvImportDefaults(): array {
+		$defaults = [];
+
+		$gender_opts = Configure::read('options.gender');
+		if (is_array($gender_opts) && !empty($gender_opts)) {
+			$keys = array_keys($gender_opts);
+			$defaults['gender'] = $keys[0];
+		}
+		if (Configure::read('gender.column') === 'roster_designation') {
+			$roster_opts = Configure::read('options.roster_designation');
+			if (is_array($roster_opts) && !empty($roster_opts)) {
+				$keys = array_keys($roster_opts);
+				$defaults['roster_designation'] = $keys[0];
+			}
+		}
+		if (Configure::read('profile.height')) {
+			$defaults['height'] = '170';
+		}
+		if (Configure::read('profile.shirt_size')) {
+			$shirt_opts = Configure::read('options.shirt_size');
+			if (is_array($shirt_opts) && !empty($shirt_opts)) {
+				$keys = array_keys($shirt_opts);
+				$defaults['shirt_size'] = $keys[0];
+			}
+		}
+		if (Configure::read('profile.birthdate')) {
+			$minYear = Configure::read('options.year.born.min');
+			$maxYear = Configure::read('options.year.born.max');
+			$year = ($minYear !== null && $maxYear !== null) ? (int)(($minYear + $maxYear) / 2) : 2000;
+			$defaults['birthdate'] = Configure::read('feature.birth_year_only') ? (string)$year : $year . '-01-01';
+		}
+		// At least one phone required when profile requires phone (use placeholder that passes phone validation)
+		if (Configure::read('profile.home_phone') || Configure::read('profile.work_phone') || Configure::read('profile.mobile_phone')) {
+			$defaults['mobile_phone'] = '+12025551234';
+		}
+		if (Configure::read('profile.addr_street')) {
+			$defaults['addr_street'] = __('To be completed');
+		}
+		if (Configure::read('profile.addr_city')) {
+			$defaults['addr_city'] = __('To be completed');
+		}
+		if (Configure::read('profile.addr_prov')) {
+			$provinces = Configure::read('provinces');
+			if (is_array($provinces) && !empty($provinces)) {
+				$keys = array_keys($provinces);
+				$defaults['addr_prov'] = $keys[0];
+			}
+		}
+		if (Configure::read('profile.addr_country')) {
+			$countries = Configure::read('countries');
+			if (is_array($countries) && !empty($countries)) {
+				$keys = array_keys($countries);
+				$defaults['addr_country'] = $keys[0];
+			}
+		}
+		if (Configure::read('profile.addr_postalcode')) {
+			$defaults['addr_postalcode'] = '00000';
+		}
+
+		return $defaults;
+	}
+
+	protected function _generatePasswordForCsv(int $length = 12): string {
+		$chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+		$pass = '';
+		for ($i = 0; $i < $length; $i++) {
+			$pass .= $chars[random_int(0, strlen($chars) - 1)];
+		}
+		return $pass;
 	}
 
 	public function add_from_team() {

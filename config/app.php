@@ -475,7 +475,9 @@ return [
 			 * then you MUST use the `flags` config to set your charset encoding.
 			 * For e.g. `'flags' => [\PDO::MYSQL_ATTR_INIT_COMMAND => 'SET NAMES utf8mb4']`
 			 */
-			'flags' => [],
+			'flags' => [
+    \PDO::MYSQL_ATTR_INIT_COMMAND => "SET sql_mode=''"
+],
 			'cacheMetadata' => true,
 			'log' => filter_var(env('DEBUG_SQL_LOG', false), FILTER_VALIDATE_BOOLEAN),
 
@@ -514,7 +516,9 @@ return [
 			'database' => env('SQL_TEST_DATABASE'),
 			'url' => env('DATABASE_TEST_URL', null),
 			'encoding' => 'utf8mb4',
-			'flags' => [],
+			'flags' => [
+    \PDO::MYSQL_ATTR_INIT_COMMAND => "SET sql_mode=''"
+],
 			'cacheMetadata' => true,
 			'log' => filter_var(env('DEBUG_SQL_LOG', false), FILTER_VALIDATE_BOOLEAN),
 			'quoteIdentifiers' => false,

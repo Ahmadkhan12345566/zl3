@@ -316,6 +316,12 @@ abstract class LeagueType {
 					$q->where(['game_date >=' => $start_date]);
 					if (empty($division->_options->double_booking)) {
 						$q->where(['GameSlots.assigned' => false]);
+						// Also exclude slots that already have a game (covers shared facilities and legacy data where assigned wasn't persisted).
+						$gamesTable = TableRegistry::getTableLocator()->get('Games');
+						$occupiedSlotSubquery = $gamesTable->find()
+							->select('game_slot_id')
+							->where(['Games.status NOT IN' => ['cancelled', 'rescheduled']]);
+						$q->where(['GameSlots.id NOT IN' => $occupiedSlotSubquery]);
 					}
 
 					return $q->order(['GameSlots.game_date', 'GameSlots.game_start']);
@@ -375,7 +381,8 @@ abstract class LeagueType {
 			foreach ($games as $game) {
 				$validate = ($game->isNew() ? 'scheduleAdd' : 'scheduleEdit');
 				$double_header = $division->_options->double_header ?? false;
-				if (!$games_table->save($game, ['validate' => $validate, 'double_header' => $double_header, 'games' => $games, 'game_slots' => $division->used_slots])) {
+				$double_booking = $division->_options->double_booking ?? false;
+				if (!$games_table->save($game, ['validate' => $validate, 'double_header' => $double_header, 'double_booking' => $double_booking, 'games' => $games, 'game_slots' => $division->used_slots])) {
 					$errors = [__('Failed to save a game.')];
 					foreach ($game->getErrors() as $field => $error) {
 						$errors[] = $field . ': ';

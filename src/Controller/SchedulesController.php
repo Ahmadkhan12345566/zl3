@@ -167,7 +167,7 @@ class SchedulesController extends AppController {
 			$stage = 0;
 		}
 
-		$this->set(compact(['id', 'division']));
+		$this->set(compact('id', 'division'));
 
 		$func = "_{$division->_options->step}";
 		return $this->$func($division, $stage);
@@ -573,6 +573,12 @@ class SchedulesController extends AppController {
 
 					if (empty($division->_options->double_booking)) {
 						$q->where(['GameSlots.assigned' => false]);
+						// Also exclude slots that already have a game (shared facilities / legacy data).
+						$gamesTable = TableRegistry::getTableLocator()->get('Games');
+						$occupiedSlotSubquery = $gamesTable->find()
+							->select('game_slot_id')
+							->where(['Games.status NOT IN' => ['cancelled', 'rescheduled']]);
+						$q->where(['GameSlots.id NOT IN' => $occupiedSlotSubquery]);
 					}
 
 					return $q->order(['GameSlots.game_date', 'GameSlots.game_start']);
@@ -656,6 +662,12 @@ class SchedulesController extends AppController {
 
 					if (empty($division->_options->double_booking)) {
 						$q->where(['GameSlots.assigned' => false]);
+						// Also exclude slots that already have a game (shared facilities / legacy data).
+						$gamesTable = TableRegistry::getTableLocator()->get('Games');
+						$occupiedSlotSubquery = $gamesTable->find()
+							->select('game_slot_id')
+							->where(['Games.status NOT IN' => ['cancelled', 'rescheduled']]);
+						$q->where(['GameSlots.id NOT IN' => $occupiedSlotSubquery]);
 					}
 
 					return $q
