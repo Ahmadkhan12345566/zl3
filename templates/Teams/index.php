@@ -42,6 +42,7 @@ else:
 			<thead>
 				<tr>
 					<th><?= $this->Paginator->sort('name') ?></th>
+					<th><?= $this->Paginator->sort('division_id') ?></th>
 					<th class="actions"><?= __('Actions') ?></th>
 				</tr>
 			</thead>
@@ -49,12 +50,18 @@ else:
 <?php
 	$affiliate_id = null;
 
+	if ($leagues == 1) {
+		$field = 'name';
+	} else {
+		$field = 'full_league_name';
+	}
+
 	foreach ($teams as $team):
 		if (count($affiliates) > 1 && $team->_matchingData['Leagues']->affiliate_id != $affiliate_id):
 			$affiliate_id = $team->_matchingData['Leagues']->affiliate_id;
 ?>
 				<tr>
-					<th colspan="2">
+					<th colspan="3">
 						<h3 class="affiliate"><?= h($team->_matchingData['Affiliates']->name) ?></h3>
 					</th>
 				</tr>
@@ -63,6 +70,7 @@ else:
 ?>
 				<tr>
 					<td><?= $this->element('Teams/block', ['team' => $team]) ?></td>
+					<td><?= $this->element('Divisions/block', ['division' => $team->_matchingData['Divisions'], 'field' => $field]) ?></td>
 					<td class="actions"><?= $this->element('Teams/actions', ['team' => $team, 'division' => $team->_matchingData['Divisions'], 'league' => $team->_matchingData['Leagues'], 'format' => 'links']) ?></td>
 				</tr>
 

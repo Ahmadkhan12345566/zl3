@@ -35,7 +35,8 @@ class TeamsController extends AppController {
 	use HasherTrait;
 
 	public $paginate = [
-		'order' => ['Teams.name' => 'ASC']
+		'order' => ['Teams.name' => 'ASC'],
+		'limit' => 100,
 	];
 
 	/**
@@ -87,10 +88,7 @@ class TeamsController extends AppController {
 		$query = $this->Teams->find()
 			->matching('Divisions.Leagues.Affiliates', function (Query $q) use ($affiliates) {
 				return $q->where(['Affiliates.id IN' => $affiliates]);
-			})
-			->where([
-				'Divisions.is_open' => true,
-			]);
+			});
 		try {
 			$teams = $this->paginate($query);
 		} catch (NotFoundException $ex) {
@@ -100,7 +98,6 @@ class TeamsController extends AppController {
 		$letters = [];
 		$leagues = $this->Teams->Divisions->Leagues->find()
 			->where([
-				'Leagues.is_open' => true,
 				'Leagues.affiliate_id IN' => $affiliates,
 			])
 			->count();
