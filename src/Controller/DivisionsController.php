@@ -787,6 +787,15 @@ class DivisionsController extends AppController {
 							$pool_entity_for_name = $first_game->home_pool_team->pool;
 							$pool_name = $pool_entity_for_name->translateField('name') ?: $pool_entity_for_name->name ?? $pool_name;
 						}
+						// Pool slots: alias => team_id (from all games; team_id may be null when not resolved)
+						$alias_to_team_id = collection($pool_entity->games)->combine('home_pool_team.alias', 'home_pool_team.team_id')->toArray()
+							+ collection($pool_entity->games)->combine('away_pool_team.alias', 'away_pool_team.team_id')->toArray();
+						$team_id_to_alias = [];
+						foreach ($alias_to_team_id as $alias => $tid) {
+							if ($tid !== null && $tid !== '') {
+								$team_id_to_alias[$tid] = $alias;
+							}
+						}
 						$team_ids_in_pool = array_unique(array_filter(array_merge(
 							collection($pool_entity->games)->extract('home_pool_team.team_id')->toArray(),
 							collection($pool_entity->games)->extract('away_pool_team.team_id')->toArray()
@@ -800,64 +809,107 @@ class DivisionsController extends AppController {
 						$sort_context = ['results' => 'pool', 'stage' => $stage_id, 'pool' => $pool_id];
 						\App\Lib\context_usort($pool_teams, [Comparison::class, 'compareTeamsTournamentResults'], $sort_context);
 						Comparison::detectAndResolveTies($pool_teams, [Comparison::class, 'compareTeamsTournamentResults'], $sort_context);
+						// Build ordered list of pool slots: resolved teams in standings order, then unresolved aliases in alias order
+						$na = 'N/A';
+						$pool_slots_ordered = [];
+						foreach ($pool_teams as $team) {
+							$pool_slots_ordered[] = ['team' => $team, 'alias' => $team_id_to_alias[$team->id] ?? ''];
+						}
+						uksort($alias_to_team_id, 'strnatcasecmp');
+						foreach ($alias_to_team_id as $alias => $tid) {
+							if ($tid === null || $tid === '' || !isset($teams_by_id[$tid])) {
+								$pool_slots_ordered[] = ['team' => null, 'alias' => $alias];
+							}
+						}
 
 						$pool_standings = [];
 						$pool_pos = 0;
-						foreach ($pool_teams as $team) {
-							$record = RoundRobinRecord::record($team, ['results' => 'pool', 'stage' => $stage_id, 'pool' => $pool_id, 'default' => true]);
-							$pool_standings[] = [
-								'pos' => ++$pool_pos,
-								'team' => $team->name ?: '',
-								'team_id' => $team->id,
-								'played' => $record->games,
-								'wins' => $record->wins,
-								'tied' => $record->ties,
-								'loss' => $record->losses,
-								'goals' => $record->goals_for . '-' . $record->goals_against,
-								'diff' => $record->goals_for - $record->goals_against,
-								'points' => $record->points,
-							];
-							$standings['standings'][] = [
-								'pos' => ++$pos,
-								'team' => $team->name ?: '',
-								'team_id' => $team->id,
-								'played' => $record->games,
-								'wins' => $record->wins,
-								'tied' => $record->ties,
-								'loss' => $record->losses,
-								'goals' => $record->goals_for . '-' . $record->goals_against,
-								'diff' => $record->goals_for - $record->goals_against,
-								'points' => $record->points,
-								'pool' => $pool_name,
-							];
+						foreach ($pool_slots_ordered as $slot) {
+							$pool_pos++;
+							if ($slot['team']) {
+								$team = $slot['team'];
+								$record = RoundRobinRecord::record($team, ['results' => 'pool', 'stage' => $stage_id, 'pool' => $pool_id, 'default' => true]);
+								$has_results = ($record->games > 0);
+								$pool_standings[] = [
+									'pos' => $pool_pos,
+									'team' => $team->name ?: $slot['alias'],
+									'team_id' => $team->id,
+									'played' => $has_results ? $record->games : $na,
+									'wins' => $has_results ? $record->wins : $na,
+									'tied' => $has_results ? $record->ties : $na,
+									'loss' => $has_results ? $record->losses : $na,
+									'goals' => $has_results ? ($record->goals_for . '-' . $record->goals_against) : $na,
+									'diff' => $has_results ? ($record->goals_for - $record->goals_against) : $na,
+									'points' => $has_results ? $record->points : $na,
+								];
+								$standings['standings'][] = [
+									'pos' => ++$pos,
+									'team' => $team->name ?: $slot['alias'],
+									'team_id' => $team->id,
+									'played' => $has_results ? $record->games : $na,
+									'wins' => $has_results ? $record->wins : $na,
+									'tied' => $has_results ? $record->ties : $na,
+									'loss' => $has_results ? $record->losses : $na,
+									'goals' => $has_results ? ($record->goals_for . '-' . $record->goals_against) : $na,
+									'diff' => $has_results ? ($record->goals_for - $record->goals_against) : $na,
+									'points' => $has_results ? $record->points : $na,
+									'pool' => $pool_name,
+								];
+							} else {
+								$pool_standings[] = [
+									'pos' => $pool_pos,
+									'team' => $slot['alias'],
+									'team_id' => null,
+									'played' => $na,
+									'wins' => $na,
+									'tied' => $na,
+									'loss' => $na,
+									'goals' => $na,
+									'diff' => $na,
+									'points' => $na,
+								];
+								$standings['standings'][] = [
+									'pos' => ++$pos,
+									'team' => $slot['alias'],
+									'team_id' => null,
+									'played' => $na,
+									'wins' => $na,
+									'tied' => $na,
+									'loss' => $na,
+									'goals' => $na,
+									'diff' => $na,
+									'points' => $na,
+									'pool' => $pool_name,
+								];
+							}
 						}
 						// Match schedule for this pool: date, time, venue, home_team, home_score, away_score, away_team
 						$pool_games = $pool_entity->games;
 						usort($pool_games, [GamesTable::class, 'compareDateAndField']);
 						$pool_schedule = [];
 						foreach ($pool_games as $game) {
-							$date = '';
-							$time = '';
-							$venue = '';
+							$date = $na;
+							$time = $na;
+							$venue = $na;
 							if ($game->has('game_slot') && $game->game_slot) {
 								$slot = $game->game_slot;
-								$date = $slot->game_date ? $slot->game_date->i18nFormat('yyyy-MM-dd') : '';
-								$time = $slot->game_start ? $slot->game_start->i18nFormat('H:mm') : '';
+								$date = $slot->game_date ? $slot->game_date->i18nFormat('yyyy-MM-dd') : $na;
+								$time = $slot->game_start ? $slot->game_start->i18nFormat('H:mm') : $na;
 								if ($slot->has('field') && $slot->field) {
-									$venue = $slot->field->long_name ?? $slot->field->translateField('num') ?? '';
+									$venue = $slot->field->long_name ?? $slot->field->translateField('num') ?? $na;
 								}
 							}
-							$home_team = '';
-							$away_team = '';
+							$home_team = $na;
+							$away_team = $na;
 							if ($game->home_team_id && isset($teams_by_id[$game->home_team_id])) {
-								$home_team = $teams_by_id[$game->home_team_id]->name ?: '';
+								$home_team = $teams_by_id[$game->home_team_id]->name ?: $na;
 							} elseif ($game->has('home_pool_team') && $game->home_pool_team) {
-								$home_team = $game->home_pool_team->alias ?? '';
+								$home_team = $game->home_pool_team->alias ?? $na;
 							}
 							if ($game->away_team_id && isset($teams_by_id[$game->away_team_id])) {
-								$away_team = $teams_by_id[$game->away_team_id]->name ?: '';
+								$away_team = $teams_by_id[$game->away_team_id]->name ?: $na;
 							} elseif ($game->has('away_pool_team') && $game->away_pool_team) {
-								$away_team = $game->away_pool_team->alias ?? '';
+								$away_team = $game->away_pool_team->alias ?? $na;
 							}
 							$pool_schedule[] = [
 								'game_id' => $game->id,
@@ -866,11 +918,11 @@ class DivisionsController extends AppController {
 								'venue' => $venue,
 								'home_team' => $home_team,
 								'home_team_id' => $game->home_team_id,
-								'home_score' => $game->home_score,
-								'away_score' => $game->away_score,
+								'home_score' => $game->home_score !== null ? $game->home_score : $na,
+								'away_score' => $game->away_score !== null ? $game->away_score : $na,
 								'away_team' => $away_team,
 								'away_team_id' => $game->away_team_id,
-								'status' => $game->status ?? null,
+								'status' => $game->status ?? $na,
 							];
 						}
 						$standings['pools'][] = [
