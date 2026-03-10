@@ -831,11 +831,54 @@ class DivisionsController extends AppController {
 								'pool' => $pool_name,
 							];
 						}
+						// Match schedule for this pool: date, time, venue, home_team, home_score, away_score, away_team
+						$pool_games = $pool_entity->games;
+						usort($pool_games, [GamesTable::class, 'compareDateAndField']);
+						$pool_schedule = [];
+						foreach ($pool_games as $game) {
+							$date = '';
+							$time = '';
+							$venue = '';
+							if ($game->has('game_slot') && $game->game_slot) {
+								$slot = $game->game_slot;
+								$date = $slot->game_date ? $slot->game_date->i18nFormat('yyyy-MM-dd') : '';
+								$time = $slot->game_start ? $slot->game_start->i18nFormat('H:mm') : '';
+								if ($slot->has('field') && $slot->field) {
+									$venue = $slot->field->long_name ?? $slot->field->translateField('num') ?? '';
+								}
+							}
+							$home_team = '';
+							$away_team = '';
+							if ($game->home_team_id && isset($teams_by_id[$game->home_team_id])) {
+								$home_team = $teams_by_id[$game->home_team_id]->name ?: '';
+							} elseif ($game->has('home_pool_team') && $game->home_pool_team) {
+								$home_team = $game->home_pool_team->alias ?? '';
+							}
+							if ($game->away_team_id && isset($teams_by_id[$game->away_team_id])) {
+								$away_team = $teams_by_id[$game->away_team_id]->name ?: '';
+							} elseif ($game->has('away_pool_team') && $game->away_pool_team) {
+								$away_team = $game->away_pool_team->alias ?? '';
+							}
+							$pool_schedule[] = [
+								'game_id' => $game->id,
+								'date' => $date,
+								'time' => $time,
+								'venue' => $venue,
+								'home_team' => $home_team,
+								'home_team_id' => $game->home_team_id,
+								'home_score' => $game->home_score,
+								'away_score' => $game->away_score,
+								'away_team' => $away_team,
+								'away_team_id' => $game->away_team_id,
+								'status' => $game->status ?? null,
+							];
+						}
 						$standings['pools'][] = [
 							'pool_name' => $pool_name,
 							'stage_id' => $stage_id,
 							'pool_id' => $pool_id,
 							'standings' => $pool_standings,
+							'schedule' => $pool_schedule,
 						];
 					}
 				}
