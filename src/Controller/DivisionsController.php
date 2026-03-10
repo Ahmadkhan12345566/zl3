@@ -17,6 +17,7 @@ use Cake\ORM\Query;
 use Cake\ORM\TableRegistry;
 use App\Model\Entity\DivisionsPerson;
 use App\Model\Results\Comparison;
+use App\Model\Results\RoundRobinRecord;
 use App\Model\Table\GamesTable;
 
 /**
@@ -760,7 +761,109 @@ class DivisionsController extends AppController {
 			$show_teams = $division->teams;
 		}
 		$this->set(compact('division', 'league_obj', 'spirit_obj', 'team_id', 'show_teams', 'more_before', 'more_after'));
-		$this->viewBuilder()->setOption('serialize', ['division']);
+
+		if ($this->getRequest()->is('json')) {
+			$standings = [
+				'division_id' => $division->id,
+				'division_name' => $division->full_league_name,
+				'standings' => [],
+				'pools' => [],
+			];
+
+			if (!empty($division->_results->pools)) {
+				// Tournament division: build per-pool standings and flat list from pool order
+				$teams_by_id = collection($division->teams)->indexBy('id')->toArray();
+				$pos = 0;
+				ksort($division->_results->pools);
+				foreach ($division->_results->pools as $stage_id => $stage) {
+					ksort($stage);
+					foreach ($stage as $pool_id => $pool_entity) {
+						if (empty($pool_entity->games)) {
+							continue;
+						}
+						$pool_name = 'Pool ' . $pool_id;
+						$first_game = $pool_entity->games[0];
+						if ($first_game->has('home_pool_team') && $first_game->home_pool_team->has('pool')) {
+							$pool_entity_for_name = $first_game->home_pool_team->pool;
+							$pool_name = $pool_entity_for_name->translateField('name') ?: $pool_entity_for_name->name ?? $pool_name;
+						}
+						$team_ids_in_pool = array_unique(array_filter(array_merge(
+							collection($pool_entity->games)->extract('home_pool_team.team_id')->toArray(),
+							collection($pool_entity->games)->extract('away_pool_team.team_id')->toArray()
+						)));
+						$pool_teams = [];
+						foreach ($team_ids_in_pool as $tid) {
+							if (isset($teams_by_id[$tid])) {
+								$pool_teams[] = $teams_by_id[$tid];
+							}
+						}
+						$sort_context = ['results' => 'pool', 'stage' => $stage_id, 'pool' => $pool_id];
+						\App\Lib\context_usort($pool_teams, [Comparison::class, 'compareTeamsTournamentResults'], $sort_context);
+						Comparison::detectAndResolveTies($pool_teams, [Comparison::class, 'compareTeamsTournamentResults'], $sort_context);
+
+						$pool_standings = [];
+						$pool_pos = 0;
+						foreach ($pool_teams as $team) {
+							$record = RoundRobinRecord::record($team, ['results' => 'pool', 'stage' => $stage_id, 'pool' => $pool_id, 'default' => true]);
+							$pool_standings[] = [
+								'pos' => ++$pool_pos,
+								'team' => $team->name ?: '',
+								'team_id' => $team->id,
+								'played' => $record->games,
+								'wins' => $record->wins,
+								'tied' => $record->ties,
+								'loss' => $record->losses,
+								'goals' => $record->goals_for . '-' . $record->goals_against,
+								'diff' => $record->goals_for - $record->goals_against,
+								'points' => $record->points,
+							];
+							$standings['standings'][] = [
+								'pos' => ++$pos,
+								'team' => $team->name ?: '',
+								'team_id' => $team->id,
+								'played' => $record->games,
+								'wins' => $record->wins,
+								'tied' => $record->ties,
+								'loss' => $record->losses,
+								'goals' => $record->goals_for . '-' . $record->goals_against,
+								'diff' => $record->goals_for - $record->goals_against,
+								'points' => $record->points,
+								'pool' => $pool_name,
+							];
+						}
+						$standings['pools'][] = [
+							'pool_name' => $pool_name,
+							'stage_id' => $stage_id,
+							'pool_id' => $pool_id,
+							'standings' => $pool_standings,
+						];
+					}
+				}
+			} else {
+				// Season division: single flat standings
+				$pos = 0;
+				foreach ($show_teams as $team) {
+					$record = RoundRobinRecord::record($team, ['results' => 'season', 'default' => true]);
+					$standings['standings'][] = [
+						'pos' => ++$pos,
+						'team' => $team->name ?: '',
+						'team_id' => $team->id,
+						'played' => $record->games,
+						'wins' => $record->wins,
+						'tied' => $record->ties,
+						'loss' => $record->losses,
+						'goals' => $record->goals_for . '-' . $record->goals_against,
+						'diff' => $record->goals_for - $record->goals_against,
+						'points' => $record->points,
+					];
+				}
+			}
+
+			$this->set(compact('standings'));
+			$this->viewBuilder()->setOption('serialize', ['standings']);
+		} else {
+			$this->viewBuilder()->setOption('serialize', ['division']);
+		}
 	}
 
 	/**
